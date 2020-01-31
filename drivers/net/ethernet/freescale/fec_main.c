@@ -1934,6 +1934,7 @@ static int fec_enet_clk_enable(struct net_device *ndev, bool enable)
 		ret = clk_prepare_enable(fep->clk_enet_out);
 		if (ret)
 			return ret;
+
 		if (fep->clk_ptp) {
 			mutex_lock(&fep->ptp_clk_mutex);
 			ret = clk_prepare_enable(fep->clk_ptp);
@@ -4060,6 +4061,7 @@ static int __maybe_unused fec_runtime_resume(struct device *dev)
 	int ret;
 
 	request_bus_freq(BUS_FREQ_HIGH);
+
 	ret = clk_prepare_enable(fep->clk_ahb);
 	if (ret)
 		return ret;
