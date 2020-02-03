@@ -139,12 +139,16 @@ static int tcpci_set_cc(struct tcpc_dev *tcpc, enum typec_cc_status cc)
 	return 0;
 }
 
-static int tcpci_start_drp_toggling(struct tcpc_dev *tcpc,
-		enum typec_cc_status cc, int attach)
+static int tcpci_start_toggling(struct tcpc_dev *tcpc,
+				enum typec_port_type port_type,
+				enum typec_cc_status cc)
 {
 	int ret;
 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
 	unsigned int reg = 0;
+
+	if (port_type != TYPEC_PORT_DRP)
+		return -EOPNOTSUPP;
 
 	/* Handle vendor drp toggling */
 	if (tcpci->data->start_drp_toggling) {
@@ -153,74 +157,36 @@ static int tcpci_start_drp_toggling(struct tcpc_dev *tcpc,
 			return ret;
 	}
 
-	/* Only set DRP bit for auto toggle when unattached */
-	if (attach) {
-		switch (cc) {
-		case TYPEC_CC_RP_DEF:
-			if (attach >> TYPEC_POLARITY_CC2)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC2_SHIFT;
-			else if (attach >> TYPEC_POLARITY_CC1)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC1_SHIFT;
-
-			reg |= (TCPC_ROLE_CTRL_RP_VAL_DEF <<
-					TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-			break;
-		case TYPEC_CC_RP_1_5:
-			if (attach >> TYPEC_POLARITY_CC2)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC2_SHIFT;
-			else if (attach >> TYPEC_POLARITY_CC1)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC1_SHIFT;
-
-			reg |= (TCPC_ROLE_CTRL_RP_VAL_1_5 <<
-					TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-			break;
-		case TYPEC_CC_RP_3_0:
-			if (attach >> TYPEC_POLARITY_CC2)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC2_SHIFT;
-			else if (attach >> TYPEC_POLARITY_CC1)
-				reg |= TCPC_ROLE_CTRL_CC_RP <<
-					TCPC_ROLE_CTRL_CC1_SHIFT;
-
-			reg |= (TCPC_ROLE_CTRL_RP_VAL_3_0 <<
-					TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-			break;
-		case TYPEC_CC_RD:
-			if (attach >> TYPEC_POLARITY_CC2)
-				reg |= TCPC_ROLE_CTRL_CC_RD <<
-					TCPC_ROLE_CTRL_CC2_SHIFT;
-			else if (attach >> TYPEC_POLARITY_CC1)
-				reg |= TCPC_ROLE_CTRL_CC_RD <<
-					TCPC_ROLE_CTRL_CC1_SHIFT;
-			break;
-		default:
-			break;
-		}
-
-		/* keep the un-touched cc line to be open */
-		if (attach >> TYPEC_POLARITY_CC2)
-			reg |= TCPC_ROLE_CTRL_CC_OPEN <<
-				TCPC_ROLE_CTRL_CC1_SHIFT;
-		else if (attach >> TYPEC_POLARITY_CC1)
-			reg |= TCPC_ROLE_CTRL_CC_OPEN <<
-				TCPC_ROLE_CTRL_CC2_SHIFT;
-	} else { /* Not attached */
-		if (cc == TYPEC_CC_RD)
-			reg = TCPC_ROLE_CTRL_DRP | 0xa; /* Rd */
-		else
-			reg = TCPC_ROLE_CTRL_DRP | 0x5; /* Rp */
+	switch (cc) {
+	case TYPEC_CC_RP_DEF:
+		reg |= (TCPC_ROLE_CTRL_RP_VAL_DEF <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+		break;
+	case TYPEC_CC_RP_1_5:
+		reg |= (TCPC_ROLE_CTRL_RP_VAL_1_5 <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+		break;
+	case TYPEC_CC_RP_3_0:
+		reg |= (TCPC_ROLE_CTRL_RP_VAL_3_0 <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+		break;
+	case TYPEC_CC_RD:
+		break;
+	default:
+		break;
 	}
 
-	regmap_write(tcpci->regmap, TCPC_ROLE_CTRL, reg);
-
-	if (!attach)
-		regmap_write(tcpci->regmap, TCPC_COMMAND,
-				TCPC_CMD_LOOK4CONNECTION);
-	return 0;
+	if (cc == TYPEC_CC_RD)
+		reg |= (TCPC_ROLE_CTRL_CC_RD << TCPC_ROLE_CTRL_CC1_SHIFT) |
+		       (TCPC_ROLE_CTRL_CC_RD << TCPC_ROLE_CTRL_CC2_SHIFT);
+	else
+		reg |= (TCPC_ROLE_CTRL_CC_RP << TCPC_ROLE_CTRL_CC1_SHIFT) |
+		       (TCPC_ROLE_CTRL_CC_RP << TCPC_ROLE_CTRL_CC2_SHIFT);
+	ret = regmap_write(tcpci->regmap, TCPC_ROLE_CTRL, reg);
+	if (ret < 0)
+		return ret;
+	return regmap_write(tcpci->regmap, TCPC_COMMAND,
+			    TCPC_CMD_LOOK4CONNECTION);
 }
 
 static enum typec_cc_status tcpci_to_typec_cc(unsigned int cc, bool sink)
@@ -732,7 +698,7 @@ struct tcpci *tcpci_register_port(struct device *dev, struct tcpci_data *data)
 	tcpci->tcpc.get_cc = tcpci_get_cc;
 	tcpci->tcpc.set_polarity = tcpci_set_polarity;
 	tcpci->tcpc.set_vconn = tcpci_set_vconn;
-	tcpci->tcpc.start_drp_toggling = tcpci_start_drp_toggling;
+	tcpci->tcpc.start_toggling = tcpci_start_toggling;
 	tcpci->tcpc.vbus_detect = tcpci_vbus_detect;
 	tcpci->tcpc.vbus_discharge = tcpci_vbus_force_discharge;
 	tcpci->tcpc.get_vbus_vol = tcpci_get_vbus_vol;
