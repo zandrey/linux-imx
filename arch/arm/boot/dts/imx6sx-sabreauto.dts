@@ -33,7 +33,8 @@
 		#reset-cells = <0>;
 	};
 
-	memory: memory@80000000 {
+	memory@80000000 {
+		device_type = "memory";
 		reg = <0x80000000 0x80000000>;
 	};
 
