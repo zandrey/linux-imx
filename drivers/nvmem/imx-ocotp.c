@@ -497,7 +497,17 @@ static int imx_ocotp_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->clk))
 		return PTR_ERR(priv->clk);
 
-	priv->dev = dev;
+	/*
+	 * Need to leave commit [f8aae26fa638c6bc2ef08a536028d6d29f14a66e]
+	 * behind, as it is causing the i.MX8MM EVK to hang during the boot.
+	 * This should be investigated further, but for the time being - just
+	 * comment the block.
+	 */
+/*
+	clk_prepare_enable(priv->clk);
+	imx_ocotp_clr_err_if_set(priv->base);
+	clk_disable_unprepare(priv->clk);
+*/
 	priv->params = of_device_get_match_data(&pdev->dev);
 	imx_ocotp_nvmem_config.size = 4 * priv->params->nregs;
 	imx_ocotp_nvmem_config.dev = dev;
